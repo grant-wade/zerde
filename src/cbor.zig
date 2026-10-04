@@ -219,7 +219,7 @@ pub const Encoder = struct {
             else => @compileError("CBOR floats require a float value"),
         };
         const float_value: Float = value;
-        const Int = std.meta.Int(.unsigned, @bitSizeOf(Float));
+        const Int = @Int(.unsigned, @bitSizeOf(Float));
         const raw: Int = @bitCast(float_value);
 
         try self.writer.writeByte(switch (Float) {
@@ -1468,7 +1468,7 @@ fn writeHead(writer: *std.Io.Writer, major: u3, value: u64) !void {
 }
 
 fn writeBig(writer: *std.Io.Writer, comptime T: type, value: T) !void {
-    const Unsigned = std.meta.Int(.unsigned, @bitSizeOf(T));
+    const Unsigned = @Int(.unsigned, @bitSizeOf(T));
     const raw: Unsigned = @bitCast(value);
     var bytes: [@sizeOf(T)]u8 = undefined;
     std.mem.writeInt(Unsigned, &bytes, raw, .big);
@@ -1476,7 +1476,7 @@ fn writeBig(writer: *std.Io.Writer, comptime T: type, value: T) !void {
 }
 
 fn readBig(reader: *std.Io.Reader, comptime T: type) !T {
-    const Unsigned = std.meta.Int(.unsigned, @bitSizeOf(T));
+    const Unsigned = @Int(.unsigned, @bitSizeOf(T));
     var bytes: [@sizeOf(T)]u8 = undefined;
     for (&bytes) |*byte| byte.* = try reader.takeByte();
     const raw = std.mem.readInt(Unsigned, &bytes, .big);
@@ -1562,7 +1562,7 @@ fn encodeFloatAlloc(allocator: std.mem.Allocator, value: anytype) ![]u8 {
         else => @compileError("CBOR floats require a float value"),
     };
     const float_value: Float = value;
-    const Int = std.meta.Int(.unsigned, @bitSizeOf(Float));
+    const Int = @Int(.unsigned, @bitSizeOf(Float));
     const raw: Int = @bitCast(float_value);
 
     try allocating.writer.writeByte(switch (Float) {
