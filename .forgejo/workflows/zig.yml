@@ -12,7 +12,12 @@ on:
 
 jobs:
   test:
+    name: Zig ${{ matrix.zig }}
     runs-on: zig-ci
+    strategy:
+      fail-fast: false
+      matrix:
+        zig: ["0.16.0", "0.17.0"]
 
     steps:
       - name: Checkout
@@ -21,10 +26,11 @@ jobs:
       - name: Set up Zig
         uses: https://codeberg.org/mlugg/setup-zig@v2.2.1
         with:
+          version: ${{ matrix.zig }}
           use-cache: false
 
       - name: Show Zig version
         run: zig version
 
       - name: Build and test
-        run: zig build test
+        run: zig build test examples docs check-tools --summary all

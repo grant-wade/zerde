@@ -159,7 +159,10 @@ fn run(init: std.process.Init.Minimal) !void {
     for (test_fns, 0..) |test_fn, test_index| {
         const capture = try Capture.start(test_index);
 
-        std.testing.allocator_instance = .{};
+        std.testing.allocator_instance = if (@hasDecl(std.heap, "SafeAllocator"))
+            .init(std.heap.page_allocator, .{})
+        else
+            .{};
         std.testing.io_instance = .init(std.testing.allocator, .{
             .argv0 = .init(init.args),
             .environ = init.environ,
@@ -180,8 +183,13 @@ fn run(init: std.process.Init.Minimal) !void {
         }
 
         std.testing.io_instance.deinit();
-        const leak_count = std.testing.allocator_instance.detectLeaks();
-        std.testing.allocator_instance.deinitWithoutLeakChecks();
+        const leak_count = if (@hasDecl(std.heap, "SafeAllocator"))
+            std.testing.allocator_instance.deinit()
+        else blk: {
+            const count = std.testing.allocator_instance.detectLeaks();
+            std.testing.allocator_instance.deinitWithoutLeakChecks();
+            break :blk count;
+        };
         if (status == .pass and leak_count != 0) status = .leak;
         if (status == .pass and log_err_count != 0) status = .log_error;
 

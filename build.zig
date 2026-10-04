@@ -65,10 +65,18 @@ pub fn build(b: *std.Build) void {
     });
     const run_doc_server = b.addRunArtifact(doc_server);
     run_doc_server.step.dependOn(&install_docs.step);
-    if (b.args) |args| run_doc_server.addArgs(args);
+    if (@hasDecl(std.Build.Step.Run, "addPassthruArgs")) {
+        run_doc_server.addPassthruArgs();
+    } else if (b.args) |args| {
+        run_doc_server.addArgs(args);
+    }
 
     const doc_serve_step = b.step("docs-serve", "Generate docs and serve zig-out/docs over HTTP");
     doc_serve_step.dependOn(&run_doc_server.step);
+
+    const check_tools_step = b.step("check-tools", "Compile the documentation generator and server");
+    check_tools_step.dependOn(&docs_md_exe.step);
+    check_tools_step.dependOn(&doc_server.step);
 
     const mod_tests = b.addTest(.{
         .root_module = mod,
@@ -81,6 +89,8 @@ pub fn build(b: *std.Build) void {
 
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
+    const docs_md_tests = b.addTest(.{ .root_module = docs_md_exe.root_module });
+    test_step.dependOn(&b.addRunArtifact(docs_md_tests).step);
 
     addCompileErrorTest(b, test_step, mod, target, optimize, "test/compile_errors/bad_metadata_field.zig", "error: zerde metadata references unknown field 'name' on bad_metadata_field.User");
     addCompileErrorTest(b, test_step, mod, target, optimize, "test/compile_errors/bad_type_option.zig", "error: unknown zerde type metadata option");

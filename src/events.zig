@@ -25,6 +25,7 @@
 //! type-directed and is not a dynamic event source.
 
 const std = @import("std");
+const reflection = @import("reflection.zig");
 
 /// Format-specific extension value used by self-describing formats.
 pub const Extension = union(enum) {
@@ -427,7 +428,7 @@ fn methodParamCount(comptime T: type, comptime name: []const u8) comptime_int {
         .pointer => |pointer| pointer.child,
         else => T,
     };
-    return @typeInfo(@TypeOf(@field(Target, name))).@"fn".params.len;
+    return reflection.paramTypes(@typeInfo(@TypeOf(@field(Target, name))).@"fn").len;
 }
 
 test "events consume json into custom sink" {

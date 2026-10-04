@@ -1,6 +1,6 @@
 # Zerde
 
-Zerde is a small Zig 0.16 serialization framework built around comptime reflection, explicit I/O, and type-specialized codecs.
+Zerde is a small Zig serialization framework built around comptime reflection, explicit I/O, and type-specialized codecs.
 
 ## Features
 
@@ -15,14 +15,14 @@ Zerde is a small Zig 0.16 serialization framework built around comptime reflecti
 
 ## Status
 
-The current version is `0.3.1` and targets Zig `0.16.0` or newer. The API is usable, but still early.
+The current version is `0.3.2`. This checkout supports Zig `0.16.0` and `0.17.0`; the API is usable, but still early.
 
 ## Quick Start
 
 1. Add `zerde` to your Zig package dependencies:
 
 ```sh
-zig fetch --save git+https://codeberg.org/gron/zerde#v0.3.1
+zig fetch --save git+https://codeberg.org/gron/zerde#v0.3.2
 ```
 
 2. Wire the dependency into your executable in `build.zig`:
@@ -442,6 +442,16 @@ Direct, alloc, and slice columns refer to the standard `write`, `read`, `writeAl
 Structural event targets are more format dependent than sources. JSON, MessagePack, CBOR, ZON, and Human can generally receive `events.Value.write` output. TOML can receive object-shaped values that satisfy TOML's root-table and no-null constraints. CSV can receive a sequence of row structs, using the first row as the fixed schema. Binary should be treated as a type-directed target rather than a dynamic event target.
 
 ## Development
+
+CI checks Zig `0.16.0` and `0.17.0`. Before submitting compatibility changes, run
+the checks with both compilers:
+
+```sh
+zig build test examples docs check-tools --summary all
+```
+
+Keep `minimum_zig_version` at `0.16.0`. Format shared source with Zig `0.16.0`:
+the Zig `0.17.0` formatter rewrites some builtins to forms that `0.16.0` cannot parse.
 
 Run the full test suite:
 
