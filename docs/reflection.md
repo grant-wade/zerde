@@ -1,0 +1,93 @@
+# reflection
+
+## Navigation
+
+- [API Index](README.md)
+
+<details>
+<summary>All documents</summary>
+
+- [root](root.md)
+- [json](json.md)
+- [serialize](serialize.md)
+- [reflection](reflection.md)
+- [base64](base64.md)
+- [containers](containers.md)
+- [meta](meta.md)
+- [rename](rename.md)
+- [deserialize](deserialize.md)
+- [deinit](deinit.md)
+- [number](number.md)
+- [toml](toml.md)
+- [datetime](datetime.md)
+- [msgpack](msgpack.md)
+- [events](events.md)
+- [cbor](cbor.md)
+- [zon](zon.md)
+- [binary](binary.md)
+- [csv](csv.md)
+- [human](human.md)
+- [traits](traits.md)
+- [schema](schema.md)
+- [format](format.md)
+- [codec](codec.md)
+
+</details>
+
+## Overview
+
+Internal reflection shared by the Zig 0.16 and 0.17 implementations.
+
+## Functions
+
+- [fields](#fn-fields)
+- [paramTypes](#fn-paramtypes)
+
+## Constants
+
+- [StructField](#const-structfield)
+- [UnionField](#const-unionfield)
+- [EnumField](#const-enumfield)
+
+<a id="const-structfield"></a>
+
+## StructField
+
+```zig
+pub const StructField =...;
+```
+
+<a id="const-unionfield"></a>
+
+## UnionField
+
+```zig
+pub const UnionField =...;
+```
+
+<a id="const-enumfield"></a>
+
+## EnumField
+
+```zig
+pub const EnumField =...;
+```
+
+<a id="fn-fields"></a>
+
+## fields
+
+Retains field order, explicit alignment, and default/comptime field metadata.
+
+```zig
+pub inline fn fields(comptime info: anytype) []const Field(@TypeOf(info))
+```
+
+<a id="fn-paramtypes"></a>
+
+## paramTypes
+
+```zig
+pub inline fn paramTypes(comptime info: Type.Fn) []const ?type
+```
+
