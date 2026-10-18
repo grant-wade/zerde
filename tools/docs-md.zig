@@ -1307,13 +1307,7 @@ fn symbolHref(allocator: Allocator, current_module: []const u8, symbol: SymbolEn
 }
 
 fn modulePathDepth(module_path: []const u8) usize {
-    const dirname = std.fs.path.dirname(module_path) orelse return 0;
-    if (dirname.len == 0 or std.mem.eql(u8, dirname, ".")) return 0;
-    var depth: usize = 1;
-    for (dirname) |byte| {
-        if (byte == std.fs.path.sep) depth += 1;
-    }
-    return depth;
+    return std.mem.count(u8, module_path, "/");
 }
 
 fn scanReference(text: []const u8, start: usize) usize {
@@ -1427,7 +1421,7 @@ fn moduleOutputRelativePath(allocator: Allocator, module_name: []const u8) ![]co
     var out = std.ArrayList(u8).empty;
     defer out.deinit(allocator);
     for (module_name) |byte| {
-        try out.append(allocator, if (byte == '.') std.fs.path.sep else byte);
+        try out.append(allocator, if (byte == '.') '/' else byte);
     }
     try out.appendSlice(allocator, ".md");
     return out.toOwnedSlice(allocator);
