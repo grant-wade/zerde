@@ -12,22 +12,31 @@ on:
 
 jobs:
   test:
-    name: Zig ${{ matrix.zig }}
-    runs-on: zig-ci
+    name: ${{ matrix.os }}, Zig ${{ matrix.zig }}
+    runs-on: ${{ matrix.runner || matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         zig: ["0.16.0", "0.17.0"]
+        os:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+          - macos-15-intel
+          - macos-15
+          - windows-2025
+          - freebsd-15.1
+        include:
+          - os: freebsd-15.1
+            runner: [self-hosted, freebsd, p1-freebsd]
 
     steps:
       - name: Checkout
-        uses: https://code.forgejo.org/actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Zig
-        uses: https://codeberg.org/mlugg/setup-zig@v2.2.1
+        uses: grant-wade/zig-setup@v1.0.1
         with:
           version: ${{ matrix.zig }}
-          use-cache: false
 
       - name: Show Zig version
         run: zig version

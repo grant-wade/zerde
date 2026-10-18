@@ -445,7 +445,7 @@ Structural event targets are more format dependent than sources. JSON, MessagePa
 
 ## Development
 
-CI checks Zig `0.16.0` and `0.17.0`. Before submitting compatibility changes, run
+CI checks Zig `0.16.0` and `0.17.0` on Linux (x86_64, aarch64), macOS (x86_64, aarch64), Windows and FreeBSD. Before submitting compatibility changes, run
 the checks with both compilers:
 
 ```sh
