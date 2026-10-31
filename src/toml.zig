@@ -1104,6 +1104,31 @@ const Parser = struct {
         array: bool,
     };
 
+    /// An inline table and the key of the value being parsed.
+    const OpenTable = struct {
+        table: Table = .{},
+        key: [][]u8 = &.{},
+    };
+
+    /// An array or inline table with values left to parse.
+    const OpenContainer = union(enum) {
+        array: std.ArrayList(Value),
+        table: OpenTable,
+
+        fn deinit(self: *OpenContainer, allocator: std.mem.Allocator) void {
+            switch (self.*) {
+                .array => |*values| {
+                    for (values.items) |*value| value.deinit(allocator);
+                    values.deinit(allocator);
+                },
+                .table => |*entry| {
+                    entry.table.deinit(allocator);
+                    freeKeyPath(allocator, entry.key);
+                },
+            }
+        }
+    };
+
     allocator: std.mem.Allocator,
     input: []const u8,
     index: usize = 0,
@@ -1224,13 +1249,28 @@ const Parser = struct {
     }
 
     fn parseValue(self: *Parser) anyerror!Value {
+        var open: std.ArrayList(OpenContainer) = .empty;
+        defer {
+            for (open.items) |*container| container.deinit(self.allocator);
+            open.deinit(self.allocator);
+        }
+        while (true) {
+            var value = try self.parseValueStart(&open) orelse continue;
+            while (open.items.len > 0) {
+                value = try self.addToOpenContainer(&open, value) orelse break;
+            } else return value;
+        }
+    }
+
+    /// Returns a complete value, or null after pushing a container with values left to parse.
+    fn parseValueStart(self: *Parser, open: *std.ArrayList(OpenContainer)) anyerror!?Value {
         try self.skipSpaceNoNewline();
         const byte = self.peekByteOrNull() orelse return error.InvalidTomlSyntax;
         return switch (byte) {
             '"' => .{ .string = try self.parseBasicString() },
             '\'' => .{ .string = try self.parseLiteralString() },
-            '[' => try self.parseArray(),
-            '{' => try self.parseInlineTable(),
+            '[' => try self.openArray(open),
+            '{' => try self.openInlineTable(open),
             't' => blk: {
                 try self.expectLiteral("true");
                 break :blk .{ .bool = true };
@@ -1244,73 +1284,85 @@ const Parser = struct {
         };
     }
 
-    fn parseArray(self: *Parser) anyerror!Value {
+    fn openArray(self: *Parser, open: *std.ArrayList(OpenContainer)) anyerror!?Value {
         try self.expectByte('[');
         if (self.nesting >= max_nesting) return error.NestingTooDeep;
         self.nesting += 1;
-        defer self.nesting -= 1;
-        var values: std.ArrayList(Value) = .empty;
-        errdefer {
-            for (values.items) |*value| value.deinit(self.allocator);
-            values.deinit(self.allocator);
-        }
-
         try self.skipWhitespaceAndComments();
-        if (self.consumeIf(']')) return .{ .array = values };
-
-        while (true) {
-            var value = try self.parseValue();
-            values.append(self.allocator, value) catch |err| {
-                value.deinit(self.allocator);
-                return err;
-            };
-            try self.skipWhitespaceAndComments();
-            if (self.consumeIf(']')) break;
-            try self.expectByte(',');
-            try self.skipWhitespaceAndComments();
-            if (self.consumeIf(']')) break;
+        if (self.consumeIf(']')) {
+            self.nesting -= 1;
+            return .{ .array = .empty };
         }
-
-        return .{ .array = values };
+        try open.append(self.allocator, .{ .array = .empty });
+        return null;
     }
 
-    fn parseInlineTable(self: *Parser) anyerror!Value {
+    fn openInlineTable(self: *Parser, open: *std.ArrayList(OpenContainer)) anyerror!?Value {
         try self.expectByte('{');
         if (self.nesting >= max_nesting) return error.NestingTooDeep;
         self.nesting += 1;
-        defer self.nesting -= 1;
-        var table = Table{};
-        errdefer table.deinit(self.allocator);
-
         try self.skipSpaceNoNewline();
         if (self.consumeIf('}')) {
+            self.nesting -= 1;
+            var table = Table{};
             markInlineTable(&table);
             return .{ .table = table };
         }
+        try open.append(self.allocator, .{ .table = .{} });
+        try self.parseInlineKey(&open.items[open.items.len - 1].table);
+        return null;
+    }
 
-        while (true) {
-            const key = try self.parseKeyPath('=');
-            defer freeKeyPath(self.allocator, key);
-            try self.skipSpaceNoNewline();
-            try self.expectByte('=');
+    fn parseInlineKey(self: *Parser, entry: *OpenTable) !void {
+        entry.key = try self.parseKeyPath('=');
+        try self.skipSpaceNoNewline();
+        try self.expectByte('=');
+        if (self.nesting + entry.key.len > max_nesting) return error.NestingTooDeep;
+        self.nesting += entry.key.len;
+    }
 
-            if (self.nesting + key.len > max_nesting) return error.NestingTooDeep;
-            self.nesting += key.len;
-            defer self.nesting -= key.len;
-            var value = try self.parseValue();
-            var transferred = false;
-            errdefer if (!transferred) value.deinit(self.allocator);
-            try self.setValueAtPath(&table, &.{}, key, value);
-            transferred = true;
-
-            try self.skipSpaceNoNewline();
-            if (self.consumeIf('}')) break;
-            try self.expectByte(',');
-            try self.skipSpaceNoNewline();
+    /// Takes ownership of `value`. Returns the innermost container once `value` closes it.
+    fn addToOpenContainer(self: *Parser, open: *std.ArrayList(OpenContainer), value: Value) anyerror!?Value {
+        const closed = switch (open.items[open.items.len - 1]) {
+            .array => |*values| closed: {
+                values.append(self.allocator, value) catch |err| {
+                    var unowned = value;
+                    unowned.deinit(self.allocator);
+                    return err;
+                };
+                try self.skipWhitespaceAndComments();
+                if (self.consumeIf(']')) break :closed true;
+                try self.expectByte(',');
+                try self.skipWhitespaceAndComments();
+                break :closed self.consumeIf(']');
+            },
+            .table => |*entry| closed: {
+                self.setValueAtPath(&entry.table, &.{}, entry.key, value) catch |err| {
+                    var unowned = value;
+                    unowned.deinit(self.allocator);
+                    return err;
+                };
+                self.nesting -= entry.key.len;
+                freeKeyPath(self.allocator, entry.key);
+                entry.key = &.{};
+                try self.skipSpaceNoNewline();
+                if (self.consumeIf('}')) break :closed true;
+                try self.expectByte(',');
+                try self.skipSpaceNoNewline();
+                try self.parseInlineKey(entry);
+                break :closed false;
+            },
+        };
+        if (!closed) return null;
+        self.nesting -= 1;
+        var container = open.pop().?;
+        switch (container) {
+            .array => |values| return .{ .array = values },
+            .table => |*entry| {
+                markInlineTable(&entry.table);
+                return .{ .table = entry.table };
+            },
         }
-
-        markInlineTable(&table);
-        return .{ .table = table };
     }
 
     fn parseNumber(self: *Parser) !Value {
@@ -2730,6 +2782,58 @@ test "toml reader rejects excessive nesting" {
     try Attempt.expectTooDeep(allocator, "a={b", ".c", "=1}");
 
     try Attempt.parse(allocator, "a=[[[[{b=[{c.d.e=1}]}]]]]");
+}
+
+test "toml reader accepts arrays up to the nesting limit on a small stack" {
+    const Attempt = struct {
+        result: anyerror!void = {},
+
+        fn parseNested(gpa: std.mem.Allocator, depth: usize) !void {
+            var input: std.ArrayList(u8) = .empty;
+            defer input.deinit(gpa);
+            try input.appendSlice(gpa, "a=");
+            try input.appendNTimes(gpa, '[', depth);
+            try input.appendNTimes(gpa, ']', depth);
+            var reader: std.Io.Reader = .fixed(input.items);
+            var document = try decoder(&reader, gpa);
+            document.deinit();
+        }
+
+        fn run(self: *@This()) void {
+            self.result = parseNested(std.testing.allocator, Parser.max_nesting - 1);
+        }
+    };
+
+    var attempt: Attempt = .{};
+    const thread = try std.Thread.spawn(.{ .stack_size = 128 << 10 }, Attempt.run, .{&attempt});
+    thread.join();
+    try attempt.result;
+    try std.testing.expectError(error.NestingTooDeep, Attempt.parseNested(std.testing.allocator, Parser.max_nesting));
+}
+
+test "toml reader frees open containers when parsing fails or allocation fails" {
+    const parse = struct {
+        fn parse(gpa: std.mem.Allocator, input: []const u8) !void {
+            var parser: Parser = .{ .allocator = gpa, .input = input };
+            var document = try parser.parseDocument();
+            document.deinit(gpa);
+        }
+    }.parse;
+
+    var fail_index: usize = 0;
+    while (true) : (fail_index += 1) {
+        var failing: std.testing.FailingAllocator = .init(std.testing.allocator, .{ .fail_index = fail_index });
+        parse(failing.allocator(), "a=[[1,\"x\",{b=[2.5],c.d={e=3},f=[]}],[],{}]") catch continue;
+        if (!failing.has_induced_failure) break;
+    }
+    for ([_][]const u8{
+        "a=[1,[\"x\",{b=[2],c=",
+        "a=[[1,],{b=\"x\",}]",
+        "a={b=1,b=2}",
+        "a={b=[1,{c=\"x\"}],d",
+    }) |input| {
+        if (parse(std.testing.allocator, input)) |_| return error.TestExpectedError else |_| {}
+    }
 }
 
 test "toml reader rejects malformed input" {
