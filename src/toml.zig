@@ -1097,6 +1097,8 @@ const Value = union(enum) {
 };
 
 const Parser = struct {
+    const max_nesting = 64;
+
     const Header = struct {
         path: [][]u8,
         array: bool,
@@ -1105,6 +1107,8 @@ const Parser = struct {
     allocator: std.mem.Allocator,
     input: []const u8,
     index: usize = 0,
+    /// Tables and arrays open around the value being parsed.
+    nesting: usize = 0,
 
     fn parseDocument(self: *Parser) !Value {
         var root = Table{};
@@ -1157,6 +1161,9 @@ const Parser = struct {
         try self.skipSpaceNoNewline();
         try self.expectByte('=');
 
+        if (current_path.len + key.len > max_nesting) return error.NestingTooDeep;
+        self.nesting = current_path.len + key.len;
+        defer self.nesting = 0;
         var value = try self.parseValue();
         var transferred = false;
         errdefer if (!transferred) value.deinit(self.allocator);
@@ -1174,7 +1181,12 @@ const Parser = struct {
 
         while (true) {
             try self.skipSpaceNoNewline();
-            try segments.append(self.allocator, try self.parseKeyPart());
+            if (segments.items.len == max_nesting) return error.NestingTooDeep;
+            const part = try self.parseKeyPart();
+            segments.append(self.allocator, part) catch |err| {
+                self.allocator.free(part);
+                return err;
+            };
             try self.skipSpaceNoNewline();
 
             const byte = self.peekByteOrNull() orelse return error.InvalidTomlSyntax;
@@ -1234,6 +1246,9 @@ const Parser = struct {
 
     fn parseArray(self: *Parser) anyerror!Value {
         try self.expectByte('[');
+        if (self.nesting >= max_nesting) return error.NestingTooDeep;
+        self.nesting += 1;
+        defer self.nesting -= 1;
         var values: std.ArrayList(Value) = .empty;
         errdefer {
             for (values.items) |*value| value.deinit(self.allocator);
@@ -1244,7 +1259,11 @@ const Parser = struct {
         if (self.consumeIf(']')) return .{ .array = values };
 
         while (true) {
-            try values.append(self.allocator, try self.parseValue());
+            var value = try self.parseValue();
+            values.append(self.allocator, value) catch |err| {
+                value.deinit(self.allocator);
+                return err;
+            };
             try self.skipWhitespaceAndComments();
             if (self.consumeIf(']')) break;
             try self.expectByte(',');
@@ -1257,6 +1276,9 @@ const Parser = struct {
 
     fn parseInlineTable(self: *Parser) anyerror!Value {
         try self.expectByte('{');
+        if (self.nesting >= max_nesting) return error.NestingTooDeep;
+        self.nesting += 1;
+        defer self.nesting -= 1;
         var table = Table{};
         errdefer table.deinit(self.allocator);
 
@@ -1272,6 +1294,9 @@ const Parser = struct {
             try self.skipSpaceNoNewline();
             try self.expectByte('=');
 
+            if (self.nesting + key.len > max_nesting) return error.NestingTooDeep;
+            self.nesting += key.len;
+            defer self.nesting -= key.len;
             var value = try self.parseValue();
             var transferred = false;
             errdefer if (!transferred) value.deinit(self.allocator);
@@ -2677,6 +2702,34 @@ test "toml field hook writes and reads" {
 
     try expectToml(User{ .active = true }, "active = \"yes\"");
     try expectRead(User, "active = \"no\"", .{ .active = false });
+}
+
+test "toml reader rejects excessive nesting" {
+    const allocator = std.testing.allocator;
+    const Attempt = struct {
+        fn parse(gpa: std.mem.Allocator, input: []const u8) !void {
+            var reader: std.Io.Reader = .fixed(input);
+            var document = try decoder(&reader, gpa);
+            document.deinit();
+        }
+
+        fn expectTooDeep(gpa: std.mem.Allocator, prefix: []const u8, unit: []const u8, suffix: []const u8) !void {
+            var input: std.ArrayList(u8) = .empty;
+            defer input.deinit(gpa);
+            try input.appendSlice(gpa, prefix);
+            for (0..200) |_| try input.appendSlice(gpa, unit);
+            try input.appendSlice(gpa, suffix);
+            try std.testing.expectError(error.NestingTooDeep, parse(gpa, input.items));
+        }
+    };
+
+    try Attempt.expectTooDeep(allocator, "a=", "[", "");
+    try Attempt.expectTooDeep(allocator, "a=", "{b=", "");
+    try Attempt.expectTooDeep(allocator, "a", ".a", "=1");
+    try Attempt.expectTooDeep(allocator, "[a", ".a", "]");
+    try Attempt.expectTooDeep(allocator, "a={b", ".c", "=1}");
+
+    try Attempt.parse(allocator, "a=[[[[{b=[{c.d.e=1}]}]]]]");
 }
 
 test "toml reader rejects malformed input" {
